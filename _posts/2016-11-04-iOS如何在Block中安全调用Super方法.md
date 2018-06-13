@@ -21,111 +21,117 @@ tags:
 首先我们创建了两个类，父类SZYParentObject和子类SZYChildObject。  
 
 `SZYParentObject.h`
+```objc
+#import <Foundation/Foundation.h>
 
-    #import <Foundation/Foundation.h>
+@interface SZYParentObject : NSObject
 
-    @interface SZYParentObject : NSObject
+- (void)superMethod;
 
-    - (void)superMethod;
-
-    @end
+@end
+```
   
 `SZYParentObject.m`
+```objc
+#import "SZYParentObject.h"
 
-    #import "SZYParentObject.h"
+@implementation SZYParentObject
 
-    @implementation SZYParentObject
+- (void)superMethod {
+    NSLog(@"%@, %@", NSStringFromClass([self class]), NSStringFromSelector(_cmd));
+}
 
-    - (void)superMethod {
-        NSLog(@"%@, %@", NSStringFromClass([self class]), NSStringFromSelector(_cmd));
-    }
-
-    @end
-
+@end
+```
 
 `SZYChildObject.h`
+```objc
+#import "SZYParentObject.h"
 
-    #import "SZYParentObject.h"
+@interface SZYChildObject : SZYParentObject
 
-    @interface SZYChildObject : SZYParentObject
+@property (nonatomic, copy) void (^customizedBlockHandler)(void);
 
-    @property (nonatomic, copy) void (^customizedBlockHandler)(void);
-
-    @end
+@end
+```
 
 `SZYChildObject.m`
+```objc
+#import "SZYChildObject.h"
 
-    #import "SZYChildObject.h"
+@interface SZYChildObject ()
 
-    @interface SZYChildObject ()
+@end
 
-    @end
+@implementation SZYChildObject
 
-    @implementation SZYChildObject
-
-    - (instancetype)init {
-        self = [super init];
-        if (self) {
-            _customizedBlockHandler = ^{
-                // 假如这里我就是想要调用父类的方法
-                [super superMethod];
-            };
-        }
-        return self;
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _customizedBlockHandler = ^{
+            // 假如这里我就是想要调用父类的方法
+            [super superMethod];
+        };
     }
+    return self;
+}
 
-    #pragma mark - override method
-    - (void)superMethod {
-        NSLog(@"子类自己的code实现");
-    }
+#pragma mark - override method
+- (void)superMethod {
+    NSLog(@"子类自己的code实现");
+}
 
-    @end
+@end
+```
   
 然后咱们在ViewController引入SZYChildObject类，初始化一个SZYChildObject类的实例并申明一个weak的属性来弱引用这个实例，方便我们检测这个实例在后续是否被释放了。
+```objc
+#import "ViewController.h"
+#import "SZYChildObject.h"
 
-    #import "ViewController.h"
-    #import "SZYChildObject.h"
+@interface ViewController ()
 
-    @interface ViewController ()
+@property (nonatomic, weak) SZYChildObject *obj;
 
-    @property (nonatomic, weak) SZYChildObject *obj;
+@end
 
-    @end
+@implementation ViewController
 
-    @implementation ViewController
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    
+    SZYChildObject *obj = [[SZYChildObject alloc] init];
+    obj.customizedBlockHandler();
+    self.obj = obj;
+}
 
-    - (void)viewDidLoad {
-        [super viewDidLoad];
-        
-        SZYChildObject *obj = [[SZYChildObject alloc] init];
-        obj.customizedBlockHandler();
-        self.obj = obj;
-    }
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    NSLog(@"%@", self.obj);
+}
 
-    - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-        NSLog(@"%@", self.obj);
-    }
-
-    @end
+@end
+```
 
 运行之后，我们担心的事情发生了。
-
-    2018-06-07 12:41:23.133185+0800 iOS如何在Block中安全调用Super[21963:10096063] SZYChildObject, superMethod
-    2018-06-07 12:41:36.714578+0800 iOS如何在Block中安全调用Super[21963:10096063] <SZYChildObject: 0x60000000f0f0>
-    2018-06-07 12:41:36.855900+0800 iOS如何在Block中安全调用Super[21963:10096063] <SZYChildObject: 0x60000000f0f0>
-    2018-06-07 12:41:36.999397+0800 iOS如何在Block中安全调用Super[21963:10096063] <SZYChildObject: 0x60000000f0f0>
+```objc
+2018-06-07 12:41:23.133185+0800 iOS如何在Block中安全调用Super[21963:10096063] SZYChildObject, superMethod
+2018-06-07 12:41:36.714578+0800 iOS如何在Block中安全调用Super[21963:10096063] <SZYChildObject: 0x60000000f0f0>
+2018-06-07 12:41:36.855900+0800 iOS如何在Block中安全调用Super[21963:10096063] <SZYChildObject: 0x60000000f0f0>
+2018-06-07 12:41:36.999397+0800 iOS如何在Block中安全调用Super[21963:10096063] <SZYChildObject: 0x60000000f0f0>
+```
 
 我们通过Xcode的[Debug Memory Graph](https://developer.apple.com/library/archive/documentation/DeveloperTools/Conceptual/debugging_with_xcode/chapters/special_debugging_workflows.html)自动分析可以看到，在应用堆内存中，这个实例一直存在，并且原因也一目了然，和一个指定block双持强引用了。
 
 ![ctdpic](https://ws1.sinaimg.cn/large/006tKfTcgy1fs2iqzmlnrj31jm0dajvv.jpg)
 
-那么再让我们回到导致循环引用的这个block。  
+那么再让我们回到导致循环引用的这个block。
 
-    _customizedBlockHandler = ^{
-        // 假如这里我就是想要调用父类的方法
-        [super superMethod];
-    };
-
+```objc
+_customizedBlockHandler = ^{
+    // 假如这里我就是想要调用父类的方法
+    [super superMethod];
+};
+```
 现在结论已经有了，在一个被self持有的block中调用super确实会引起**循环引用**，那么应该怎样在必须调用super方法的前提下如何避免循环引用呢？首先我们要来了解一下super这个复杂且带有欺骗性的关键字。  
 
 在iOS语言中，self是类的隐藏的参数，指向当前调用方法的类，另一个隐藏的参数是_cmd，代表当前类方法对应的selector。而看似近似的super关键字却绝非是个隐藏的参数，它是一个**"编译器指示符"**。我们都知道通过self调用方法，实际上会调用**objc_msgSend函数**，而通过下面官方文档的说明截图我们发现，如果通过super调用方法实际上则是调用**objc_msgSendSuper函数**。
@@ -133,7 +139,9 @@ tags:
 
 那我们继续看下**objc_msgSend**和**objc_msgSendSuper**的区别。首先是objc_msgSend:
 
-    id objc_msgSend(id self, SEL op, ...);
+```objc
+id objc_msgSend(id self, SEL op, ...);
+```
 
 第一个参数是消息接收者，第二个参数是调用的具体类方法的selector，后面跟着selector方法的可变参数。拿上面demo中的两个类举栗，如果我们在子类也就是SZYChildObject类中调用  
 **[self superMethod];**  
@@ -141,32 +149,38 @@ tags:
 
 然后是objc_msgSendSuper:
 
-    id objc_msgSendSuper(struct objc_super *super, SEL op, ...);
+```objc
+id objc_msgSendSuper(struct objc_super *super, SEL op, ...);
+```
 
 第一个参数是一个objc_super的结构体，第二个参数跟objc_msgSend的第二个参数是一致的。那么我们就需要把焦点转移到结构体**objc_super**上了。一样通过runtime文档找到这个结构体的申明：
 
-    /// Specifies the superclass of an instance. 
-    struct objc_super {
-        /// Specifies an instance of a class.
-        __unsafe_unretained _Nonnull id receiver;
+```objc
+/// Specifies the superclass of an instance. 
+struct objc_super {
+    /// Specifies an instance of a class.
+    __unsafe_unretained _Nonnull id receiver;
 
-        /// Specifies the particular superclass of the instance to message. 
-    #if !defined(__cplusplus)  &&  !__OBJC2__
-        /* For compatibility with old objc-runtime.h header */
-        __unsafe_unretained _Nonnull Class class;
-    #else
-        __unsafe_unretained _Nonnull Class super_class;
-    #endif
-        /* super_class is the first class to search */
-    };
-    #endif  
+    /// Specifies the particular superclass of the instance to message. 
+#if !defined(__cplusplus)  &&  !__OBJC2__
+    /* For compatibility with old objc-runtime.h header */
+    __unsafe_unretained _Nonnull Class class;
+#else
+    __unsafe_unretained _Nonnull Class super_class;
+#endif
+    /* super_class is the first class to search */
+};
+#endif  
+```
 
 简化之后其实就是：
 
-    struct objc_super {
-        __unsafe_unretained id receiver;
-        __unsafe_unretained Class super_class;
-    };
+```objc
+struct objc_super {
+    __unsafe_unretained id receiver;
+    __unsafe_unretained Class super_class;
+};
+```
 
 我们可以看到这个结构体包含了两个成员，第一个成员变量**receiver**就是**子类实例本身**，和**self**相同。而第二个成员变量**super_class**其实就是指向的父类**SZYParentObject**了。  
 
@@ -178,39 +192,47 @@ tags:
 
 将super用源码展开后：
 
-    _customizedBlockHandler = ^{
-        struct objc_super superInfo = {
-            .receiver = self,
-            .super_class = class_getSuperclass(NSClassFromString(@"SZYChildObject"))
-        };
-        void (*msgSendSuperFunction)(struct objc_super *, SEL) = (__typeof__(msgSendSuperFunction))objc_msgSendSuper;
-        msgSendSuperFunction(&superInfo, @selector(superMethod));
+```objc
+_customizedBlockHandler = ^{
+    struct objc_super superInfo = {
+        .receiver = self,
+        .super_class = class_getSuperclass(NSClassFromString(@"SZYChildObject"))
     };
+    void (*msgSendSuperFunction)(struct objc_super *, SEL) = (__typeof__(msgSendSuperFunction))objc_msgSendSuper;
+    msgSendSuperFunction(&superInfo, @selector(superMethod));
+};
+```
 
 可以很明显的看到问题，block强引用了self，而self也强持有了这个block。
 
 而正确的调用姿势跟平常我们切断block的循环引用的姿势一模一样：
 
-    __weak __typeof(self) weak_self = self;
-    _customizedBlockHandler = ^{
-        struct objc_super superInfo = {
-            .receiver = weak_self,
-            .super_class = class_getSuperclass(NSClassFromString(@"SZYChildObject"))
-        };
-        void (*msgSendSuperFunction)(struct objc_super *, SEL) = (__typeof__(msgSendSuperFunction))objc_msgSendSuper;
-        msgSendSuperFunction(&superInfo, @selector(superMethod));
+```objc
+__weak __typeof(self) weak_self = self;
+_customizedBlockHandler = ^{
+    struct objc_super superInfo = {
+        .receiver = weak_self,
+        .super_class = class_getSuperclass(NSClassFromString(@"SZYChildObject"))
     };
+    void (*msgSendSuperFunction)(struct objc_super *, SEL) = (__typeof__(msgSendSuperFunction))objc_msgSendSuper;
+    msgSendSuperFunction(&superInfo, @selector(superMethod));
+};
+```
 
 改完咱们再重新Run一下示例Demo，发现一切都正常了~
 
 ## 后续
 其实看到这里，应该有人会对
 
-    .super_class = class_getSuperclass(NSClassFromString(@"SZYChildObject"))   
+```objc
+.super_class = class_getSuperclass(NSClassFromString(@"SZYChildObject"))   
+```
 
 这个方法产生些疑惑，在这里为什么是选择用写死**SZYChildObject**类名而不是通过  
 
-    .super_class = class_getSuperclass(objc_getClass(self))
+```objc
+.super_class = class_getSuperclass(objc_getClass(self))
+```
 
 去调用到当前的类并赋值给成员变量**super_class**。  
 
