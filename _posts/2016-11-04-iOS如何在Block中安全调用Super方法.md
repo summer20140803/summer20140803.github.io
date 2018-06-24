@@ -3,7 +3,7 @@ layout:     post
 title:      iOS如何在Block中安全调用Super方法
 date:       2016-11-04
 author:     开不了口的猫
-header-img: img/icon_如何在Block中安全调用Super方法_bg.jpg
+header-img: img/icon_block_invoke_super_bg.jpg
 catalog: true
 tags:
     - iOS

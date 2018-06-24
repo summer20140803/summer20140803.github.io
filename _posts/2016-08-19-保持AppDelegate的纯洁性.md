@@ -3,7 +3,7 @@ layout:     post
 title:      保持AppDelegate的纯洁性
 date:       2016-08-19
 author:     开不了口的猫
-header-img: img/icon_保持AppDelegate的纯洁性_bg.png
+header-img: img/icon_post_appdelegate_bg.jpg
 catalog: true
 tags:
     - iOS

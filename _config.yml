@@ -1,7 +1,7 @@
 # Site settings
 title: 开不了口的猫
 SEOTitle: 开不了口的猫的博客 | SZY Blog
-header-img: img/post-bg-desk.jpg
+header-img: img/icon_home_bg.JPG
 email: summer20140803@gmail.com
 description: "作我所感，感我所作。"
 keyword: "开不了口的猫, 开不了口的猫的Blog, 施正宇, shizhengyu, TDFScreenDebugger, 真机调试, iOS, Apple, iPhone, 自由, 自由行, 攻略"
@@ -12,7 +12,7 @@ github_repo: "https://github.com/summer20140803/summer20140803.github.io.git" # 
 # Sidebar settings
 sidebar: true                           # whether or not using Sidebar.
 sidebar-about-description: "追逐自由"
-sidebar-avatar: /img/icon_avatar_myself.png      # use absolute URL, seeing it's used in both `/` and `/about/`
+sidebar-avatar: /img/icon_avatar_myself.jpg      # use absolute URL, seeing it's used in both `/` and `/about/`
 
 
 

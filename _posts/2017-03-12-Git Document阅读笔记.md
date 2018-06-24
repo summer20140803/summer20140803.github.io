@@ -3,7 +3,7 @@ layout:     post
 title:      Git Document阅读笔记
 date:       2017-03-12
 author:     开不了口的猫
-header-img: img/icon_GitDocument阅读笔记_bg.jpg
+header-img: img/icon_git_document_reading_bg.jpg
 catalog: true
 tags:
     - Git

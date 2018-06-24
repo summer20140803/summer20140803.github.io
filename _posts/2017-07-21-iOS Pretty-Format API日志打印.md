@@ -3,7 +3,7 @@ layout:     post
 title:      iOS Pretty-Format API日志打印
 date:       2017-07-21
 author:     开不了口的猫
-header-img: img/icon_pretty_format_api_logger_bg.png
+header-img: img/icon_pretty_format_api_logger_bg.jpg
 catalog: true
 tags:
     - iOS
