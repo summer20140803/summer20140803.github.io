@@ -1,11 +1,11 @@
 # Site settings
 title: 开不了口的猫
-SEOTitle: 开不了口的猫的博客 | SZY Blog
+SEOTitle: 开不了口的猫的技术博客
 header-img: img/icon_home_bg.JPG
 email: summer20140803@gmail.com
 description: "作我所感，感我所作。"
 keyword: "开不了口的猫, 开不了口的猫的Blog, 施正宇, shizhengyu, TDFScreenDebugger, 真机调试, iOS, Apple, iPhone, 自由, 自由行, 攻略"
-url: "https://summer20140803.github.io"          # your host, for absolute URL
+url: "http://silentcat.top"          # your host, for absolute URL
 baseurl: ""      # for example, '/blog' if your blog hosted on 'host/blog'
 github_repo: "https://github.com/summer20140803/summer20140803.github.io.git" # you code repository
 
@@ -97,14 +97,6 @@ service-worker: true
 friends: [
     {
         title: "杭州人在世界",
-        href: "https://hzpitw.github.io"
-    },
-    {
-        title: "Apple",
-        href: "https://apple.com"
-    },
-    {
-        title: "Apple Developer",
-        href: "https://developer.apple.com/"
+        href: "http://hzpitw.club"
     }
 ]
