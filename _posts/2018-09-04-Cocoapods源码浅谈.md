@@ -278,6 +278,260 @@ installer.update = false
     end
 {% endhighlight %}
 
+首先检查了当前路径是否是Podfile文件所在的项目根目录，然后调用`deintegrate_if_different_major_version`
+
+{% highlight ruby %}
+    def deintegrate_if_different_major_version
+      return unless lockfile
+      return if lockfile.cocoapods_version.major == Version.create(VERSION).major
+      UI.section('Re-creating CocoaPods due to major version update.') do
+        projects = Pathname.glob(config.installation_root + '*.xcodeproj').map { |path| Xcodeproj::Project.open(path) }
+        deintegrator = Deintegrator.new
+        projects.each do |project|
+          config.with_changes(:silent => true) { deintegrator.deintegrate_project(project) }
+          project.save if project.dirty?
+        end
+      end
+    end
+{% endhighlight %}
+
+检查podfile.lock的写入的cocoapods版本和当前cocoapods版本是否一致，如果不一致将会重塑工程，将除了Podfile、Podfile.lock、Workspace以外的其他关联和依赖全部重置。其中的核心方法`deintegrate_project`来自另一个cocoapods的gem - [cocoapods-deintegrate](https://github.com/CocoaPods/cocoapods-deintegrate)。这里不继续深究了，有兴趣的可以自行查看源码。<br>
+<br>
+然后调用`Sandbox#prepare`方法建立项目沙盒(Pods)中几个重要的文件夹，主要包括Headers、root、Local Podspecs、Target Support Files等。<br>
+
+{% highlight ruby %}
+    def ensure_plugins_are_installed!
+      require 'claide/command/plugin_manager'
+
+
+      loaded_plugins = Command::PluginManager.specifications.map(&:name)
+
+      podfile.plugins.keys.each do |plugin|
+        unless loaded_plugins.include? plugin
+          raise Informative, "Your Podfile requires that the plugin `#{plugin}` be installed. Please install it and try installation again."
+        end
+      end
+    end
+{% endhighlight %}
+
+`ensure_plugins_are_installed!`方法会检查Podfile中通过`plugin`语法应用的插件在你本地RubyGems中是否已经安装，如果没有安装，将会报错。<br>
+
+{% highlight ruby %}
+    def run_plugins_pre_install_hooks
+      context = PreInstallHooksContext.generate(sandbox, podfile, lockfile)
+      HooksManager.run(:pre_install, context, plugins)
+    end
+{% endhighlight %}
+
+`run_plugins_pre_install_hooks`方法会由sandbox、podfile、lockfile生成`PreInstallHooksContext`类的实例context，然后通过`HooksManager.run`方法遍历通过`HooksManager.register`方法注册`pre_install`切片的所有插件，执行他们注册时传入的block处理块。
+
+{% highlight ruby %}
+    def run(name, context, whitelisted_plugins = nil)
+        raise ArgumentError, 'Missing name' unless name
+        raise ArgumentError, 'Missing options' unless context
+
+        if registrations
+          hooks = registrations[name]
+          if hooks
+            UI.message "- Running #{name.to_s.tr('_', ' ')} hooks" do
+              hooks.each do |hook|
+                next if whitelisted_plugins && !whitelisted_plugins.key?(hook.plugin_name)
+                UI.message "- #{hook.plugin_name} from " \
+                           "`#{hook.block.source_location.first}`" do
+                  block = hook.block
+                  if block.arity > 1
+                    user_options = whitelisted_plugins[hook.plugin_name]
+                    user_options = user_options.with_indifferent_access if user_options
+                    block.call(context, user_options)
+                  else
+                    block.call(context)
+                  end
+                end
+              end
+            end
+          end
+        end
+    end
+{% endhighlight %}
+
+这里也顺带提一下制作自己插件过程中，如果想要通过HooksManager来注入不同时机的切片处理的方式。可以像下面这样在诸如pre_install、post_install或post_update等时机加入自定义的处理逻辑。
+
+{% highlight ruby %}
+    Pod::HooksManager.register('plugin_name', :post_install)
+    do |context|
+        # my own handler
+    end
+    Pod::HooksManager.register('plugin_name', :post_update)
+    do |context|
+        # my own handler
+    end
+{% endhighlight %}
+
+至此prepare要做的预备工作就基本结束了，接下来看`resolve_dependencies`方法的实现过程。
+
+{% highlight ruby %}
+    def resolve_dependencies
+      plugin_sources = run_source_provider_hooks
+      analyzer = create_analyzer(plugin_sources)
+
+      UI.section 'Updating local specs repositories' do
+        analyzer.update_repositories
+      end if repo_update?
+
+      UI.section 'Analyzing dependencies' do
+        analyze(analyzer)
+        validate_build_configurations
+        clean_sandbox
+      end
+      analyzer
+    end
+{% endhighlight %}
+
+`run_source_provider_hooks`将遍历注册的所有插件，其中通过`HooksManager.register`方法注册name为`:source_provider`的插件，将会执行对应的处理block，并返回这些sources。<br>
+紧接着执行`create_analyzer`方法创建安装分析器。
+
+{% highlight ruby %}
+    def create_analyzer(plugin_sources = nil)
+      Analyzer.new(sandbox, podfile, lockfile, plugin_sources).tap do |analyzer|
+        analyzer.installation_options = installation_options
+        analyzer.has_dependencies = has_dependencies?
+      end
+    end
+{% endhighlight %}
+
+以下是Analyzer类的构造方法，
+
+{% highlight ruby %}
+    def initialize(sandbox, podfile, lockfile = nil, plugin_sources = nil)
+        @sandbox  = sandbox
+        @podfile  = podfile
+        @lockfile = lockfile
+        @plugin_sources = plugin_sources
+
+        @update = false
+        @allow_pre_downloads = true
+        @has_dependencies = true
+        @test_pod_target_analyzer_cache = {}
+        @test_pod_target_key = Struct.new(:name, :pod_targets)
+        @podfile_dependency_cache = PodfileDependencyCache.from_podfile(podfile)
+    end
+{% endhighlight %}
+
+以上主要就是将所有预先配置好的配置项丢给Analyzer类，通过Analyzer类来专门负责分析并处理依赖关系。<br>
+<br>
+紧接着，`resolve_dependencies`的实现源码中出现了我们在终端执行`pod install`时频繁出现的提示语`Updating local specs repositories`，如果我们在执行pod install时附加了`--repo-update`flag，则刚才创建的analyzer实例将执行`update_repositories`方法去更新本地repo仓库的所有pod spec文件。
+
+{% highlight ruby %}
+    def update_repositories
+        sources.each do |source|
+          if source.git?
+            config.sources_manager.update(source.name, true)
+          else
+            UI.message "Skipping `#{source.name}` update because the repository is not a git source repository."
+          end
+        end
+        @specs_updated = true
+    end
+{% endhighlight %}
+
+这里将获取所有的sources，我们来看`Analyzer#sources`方法，sources包括官方的repo源、Podfile文件中调用`source`方法引入的repo源、还有部分插件引入的源。
+
+{% highlight ruby %}
+    def sources
+        @sources ||= begin
+          sources = podfile.sources
+          plugin_sources = @plugin_sources || []
+
+          # Add any sources specified using the :source flag on individual dependencies.
+          dependency_sources = @podfile_dependency_cache.podfile_dependencies.map(&:podspec_repo).compact
+          all_dependencies_have_sources = dependency_sources.count == @podfile_dependency_cache.podfile_dependencies.count
+
+          if all_dependencies_have_sources
+            sources = dependency_sources
+          elsif has_dependencies? && sources.empty? && plugin_sources.empty?
+            sources = ['https://github.com/CocoaPods/Specs.git']
+          else
+            sources += dependency_sources
+          end
+
+          result = sources.uniq.map do |source_url|
+            config.sources_manager.find_or_create_source_with_url(source_url)
+          end
+          unless plugin_sources.empty?
+            result.insert(0, *plugin_sources)
+          end
+          result
+        end
+    end
+{% endhighlight %}
+
+其中`Source::Manager#find_or_create_source_with_url`方法主要是验证手动添加的sources的url是否是有效的，如果有效，则会直接调用`Command::Repo::Add.parse.run`，相当于执行了`pod repo add`命令。<br>
+<br>
+让我们回到`Analyzer#update_repositories`方法中，再来窥探一下另一个方法`Pod::Source::Manager#update`。
+
+{% highlight ruby %}
+    def update(source_name = nil, show_output = false)
+        if source_name
+          sources = [git_source_named(source_name)]
+        else
+          sources =  git_sources
+        end
+
+        changed_spec_paths = {}
+        sources.each do |source|
+          UI.section "Updating spec repo `#{source.name}`" do
+            changed_source_paths = source.update(show_output)
+            changed_spec_paths[source] = changed_source_paths if changed_source_paths.count > 0
+            source.verify_compatibility!
+          end
+        end
+        # Perform search index update operation in background.
+        update_search_index_if_needed_in_background(changed_spec_paths)
+    end
+{% endhighlight %}
+
+其中遍历了所有的source源，提示`Updating spec repo sourcename`的同时执行`Source#update`方法，并在执行更新完毕后，在后台开启了子进程用于更新pod search的索引。来看一下Source#update方法的具体实现。
+
+{% highlight ruby %}
+    def update(show_output)
+      return [] if unchanged_github_repo?
+      prev_commit_hash = git_commit_hash
+      update_git_repo(show_output)
+      @versions_by_name.clear
+      refresh_metadata
+      if version = metadata.last_compatible_version(Version.new(CORE_VERSION))
+        tag = "v#{version}"
+        CoreUI.warn "Using the `#{tag}` tag of the `#{name}` source because " \
+          "it is the last version compatible with CocoaPods #{CORE_VERSION}."
+        repo_git(['checkout', tag])
+      end
+      diff_until_commit_hash(prev_commit_hash)
+    end
+{% endhighlight %}
+
+这个方法中首先检查了当前的source指向的Git远程仓库是否有变化，如果没有变化则直接返回空数组。如果发现远程仓库有新的更新，则会接着调用`update_git_repo`方法。
+
+{% highlight ruby %}
+    def update_git_repo(show_output = false)
+      repo_git(['checkout', git_tracking_branch])
+      output = repo_git(%w(pull --ff-only), :include_error => true)
+      CoreUI.puts output if show_output
+    end
+{% endhighlight %}
+
+这个方法使用到了`repo_git`，而这个方法是使用仓库本地的git配置去执行一些git命令并根据show_output参数选择是否需要输出，这里是执行了git pull更新本地spec源仓库。而`diff_until_commit_hash`则是输出两个commit的`git diff`内容。<br>
+<br>
+至此，`Analyzer#update_repositories`的调用堆栈大致清晰了。让我们回到`resolve_dependencies`方法，在更新完本地spec源仓库后，开始进行真正的`依赖分析`过程。
+
+{% highlight ruby %}
+    UI.section 'Analyzing dependencies' do
+        analyze(analyzer)
+        validate_build_configurations
+        clean_sandbox
+    end
+{% endhighlight %}
+
+
 最后总结一下install!方法主要要干的几件事：
 1. prepare 准备工作
     * 检查安装目录,必须在项目根目录
@@ -286,7 +540,7 @@ installer.update = false
     * 检查Podfile中的plugin插件都已经安装并加载
     * 加载插件
 2. resolve_dependencies 解决依赖
-    * 检查是否需要更新podsource源
+    * 检查是否需要更新pod source源
     * 如果Podfile中有删除的库, 进行清理文件
 3. download_dependencies 下载依赖库
     * 下载各个pod库
